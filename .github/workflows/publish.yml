@@ -23,7 +23,7 @@ jobs:
       uses: microsoft/setup-msbuild@v1.0.2
       
     - name: Download NuGet dependencies
-      run: dotnet restore $env:Solution_Name --source https://api.nuget.org/v3/index.json
+      run: dotnet restore $env:Solution_Name
       
     - name: Build solution
       run: msbuild $env:Solution_Name /p:Configuration=$env:Build_Config
@@ -45,7 +45,7 @@ jobs:
         tag_name: ${{ github.ref }}
         release_name: SC:Tools ${{ github.ref }}
         draft: false
-        prerelease: false
+        prerelease: true
 
     - name: Upload Release Asset
       id: upload-release-asset 

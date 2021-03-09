@@ -1,16 +1,17 @@
 using System;
 using System.Collections.Generic;
-using System.Net.Http;
 using System.Linq;
+using System.Net.Http;
 using System.Windows.Forms;
 using NSW.StarCitizen.Tools.Adapters;
 using NSW.StarCitizen.Tools.Controllers;
-using NSW.StarCitizen.Tools.Lib.Helpers;
+using NSW.StarCitizen.Tools.Helpers;
 using NSW.StarCitizen.Tools.Lib.Global;
+using NSW.StarCitizen.Tools.Lib.Helpers;
 using NSW.StarCitizen.Tools.Lib.Localization;
 using NSW.StarCitizen.Tools.Lib.Update;
 using NSW.StarCitizen.Tools.Properties;
-using NSW.StarCitizen.Tools.Helpers;
+using NSW.StarCitizen.Tools.Repository;
 
 namespace NSW.StarCitizen.Tools.Forms
 {
@@ -19,6 +20,7 @@ namespace NSW.StarCitizen.Tools.Forms
         private bool _isGameFolderSet;
         private bool _holdUpdates;
         private string? _lastBrowsePath;
+        private DateTime? _lastSettingsLoadTime;
         private List<GameMode>? _gameModes;
 
         public MainForm()
@@ -51,6 +53,7 @@ namespace NSW.StarCitizen.Tools.Forms
             miRunOnStartup.Text = Resources.Localization_RunOnStartup_Text;
             miRunTopMost.Text = Resources.Localization_AlwaysOnTop_Text;
             miUseHttpProxy.Text = Resources.Localization_UseHttpProxy_Text;
+            miUpdateToAlphaVersions.Text = Resources.Application_UpdatePreReleases_Text;
             miTools.Text = Resources.Tools_Title;
             miMoveLiveToPtu.Text = Resources.Tools_Move_LIVE_PTU;
             miMovePtuToLive.Text = Resources.Tools_Move_PTU_LIVE;
@@ -113,6 +116,7 @@ namespace NSW.StarCitizen.Tools.Forms
         {
             SetGameFolder(Program.Settings.GameFolder);
 
+            AppUpdate.Updater.AllowPreReleases = Program.Settings.Update.AllowPreReleases;
             if (Program.Settings.Update.MonitorUpdates)
                 AppUpdate.Updater.MonitorStart(Program.Settings.Update.MonitorRefreshTime);
         }
@@ -156,7 +160,7 @@ namespace NSW.StarCitizen.Tools.Forms
                 ShowNewFolderButton = false,
                 SelectedPath = _lastBrowsePath ?? (_isGameFolderSet ? tbGamePath.Text : string.Empty)
             };
-            if (dlg.ShowDialog() == DialogResult.OK)
+            if (dlg.ShowDialog(this) == DialogResult.OK)
             {
                 _lastBrowsePath = dlg.SelectedPath;
                 string? gamePath = GameFolders.SearchGameFolder(_lastBrowsePath);
@@ -212,6 +216,25 @@ namespace NSW.StarCitizen.Tools.Forms
                     MessageBox.Show(this, Resources.Localization_NoUpdatesFound_Text,
                         Resources.Localization_CheckForUpdate_Title,
                         MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+        }
+
+        private async void btnGameSettings_Click(object sender, EventArgs e)
+        {
+            if (Program.CurrentGame != null)
+            {
+                bool reload = _lastSettingsLoadTime.HasValue && DateTime.UtcNow.Subtract(_lastSettingsLoadTime.Value).TotalHours >= 1;
+                var configDataLoadController = new ConfigDataLoadController(ConfigDataRepository.Loader);
+                var configData = await configDataLoadController.LoadDatabaseAsync(this, Program.Settings.Language, forceReload: reload);
+                if (configData != null)
+                {
+                    if (!_lastSettingsLoadTime.HasValue || reload)
+                    {
+                        _lastSettingsLoadTime = DateTime.UtcNow;
+                    }
+                    using var dlg = new GameSettingsForm(Program.CurrentGame, configData);
+                    dlg.ShowDialog(this);
                 }
             }
         }
@@ -336,6 +359,7 @@ namespace NSW.StarCitizen.Tools.Forms
             miRunOnStartup.Checked = Program.Settings.RunWithWindows;
             miRunTopMost.Checked = Program.Settings.TopMostWindow;
             miUseHttpProxy.Checked = Program.Settings.UseHttpProxy;
+            miUpdateToAlphaVersions.Checked = Program.Settings.Update.AllowPreReleases;
             if (Program.Settings.GameFolder != null && _gameModes != null)
             {
                 miMoveLiveToPtu.Enabled = _gameModes.Contains(GameMode.LIVE) && !_gameModes.Contains(GameMode.PTU);
@@ -380,6 +404,13 @@ namespace NSW.StarCitizen.Tools.Forms
             Program.Settings.UseHttpProxy = miUseHttpProxy.Checked;
             Program.SaveAppSettings();
             // TODO: need some dialog about need restart to apply this setting
+        }
+
+        private void miUpdateToAlphaVersions_Click(object sender, EventArgs e)
+        {
+            AppUpdate.Updater.AllowPreReleases = miUpdateToAlphaVersions.Checked;
+            Program.Settings.Update.AllowPreReleases = miUpdateToAlphaVersions.Checked;
+            Program.SaveAppSettings();
         }
 
         private void cbMenuLanguage_SelectedIndexChanged(object sender, EventArgs e)
@@ -478,6 +509,7 @@ namespace NSW.StarCitizen.Tools.Forms
             var controller = new LocalizationController(gameInfo);
             btnUpdateLocalization.Visible = controller.CurrentInstallation.InstalledVersion != null &&
                                             controller.GetInstallationType() != LocalizationInstallationType.None;
+            btnGameSettings.Text = string.Format(Resources.GameSettings_Button_Text, gameInfo.Mode);
         }
 
         private void UpdateAppInstallButton()
@@ -491,9 +523,11 @@ namespace NSW.StarCitizen.Tools.Forms
         private void InitLanguageCombobox(ComboBox combobox)
         {
             combobox.BindingContext = BindingContext;
-            combobox.DataSource = new BindingSource(Program.GetSupportedUiLanguages(), null);
             combobox.DisplayMember = "Value";
             combobox.ValueMember = "Key";
+            var prevDataSource = combobox.DataSource;
+            combobox.DataSource = new BindingSource(Program.GetSupportedUiLanguages(), null);
+            DisposableUtils.Dispose(prevDataSource);
             combobox.SelectedValue = Program.Settings.Language;
         }
     }
